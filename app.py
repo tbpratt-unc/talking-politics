@@ -16,8 +16,7 @@ CORS(app, resources={r"/*": {"origins": "https://unc.az1.qualtrics.com"}})
 
 @app.after_request
 def after_request(response):
-    # Ensure all necessary CORS headers are included
-    response.headers.add("Access-Control-Allow-Origin", "https://unc.az1.qualtrics.com")
+    # Allow CORS headers, except for `Access-Control-Allow-Origin` which is handled by Flask-CORS
     response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
     response.headers.add("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
     return response
@@ -31,9 +30,8 @@ def chat():
     # Handle preflight OPTIONS request
     if request.method == 'OPTIONS':
         response = jsonify({'status': 'Preflight check successful'})
-        response.headers.add("Access-Control-Allow-Origin", "https://unc.az1.qualtrics.com")
-        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
         response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
         return response, 200
 
     # Handle POST requests for chatbot interactions
