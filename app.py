@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from openai import OpenAI
 from dotenv import load_dotenv
-import os  
+import os
 from flask_cors import CORS
 
 # Load environment variables from .env file
@@ -17,7 +17,7 @@ CORS(app, resources={r"/*": {"origins": "https://unc.az1.qualtrics.com"}})
 @app.after_request
 def after_request(response):
     # Ensure all necessary CORS headers are included
-    response.headers.add("Access-Control-Allow-Origin", "*")
+    response.headers.add("Access-Control-Allow-Origin", "https://unc.az1.qualtrics.com")
     response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
     response.headers.add("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
     return response
@@ -26,31 +26,41 @@ def after_request(response):
 def home():
     return "Your Flask app is running"
 
-@app.route("/chat", methods=["POST"])
+@app.route('/chat', methods=['POST', 'OPTIONS'])
 def chat():
-    # Retrieve the user's message from the request
-    user_message = request.json.get("message")
+    # Handle preflight OPTIONS request
+    if request.method == 'OPTIONS':
+        response = jsonify({'status': 'Preflight check successful'})
+        response.headers.add("Access-Control-Allow-Origin", "https://unc.az1.qualtrics.com")
+        response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        return response, 200
 
-    if not user_message:
-        return jsonify({"error": "No message provided"}), 400
+    # Handle POST requests for chatbot interactions
+    if request.method == 'POST':
+        # Retrieve the user's message from the request
+        user_message = request.json.get("message")
 
-    try:
-        # Use the OpenAI API with the updated syntax
-        response = client.chat.completions.create(
-            model="gpt-4",  # Replace with "gpt-3.5-turbo" if applicable
-            messages=[
-                {"role": "system", "content": "You are a friend who enjoys debating policy issues."},
-                {"role": "user", "content": user_message}
-            ]
-        )
-        # Extract the assistant's reply
-        bot_message = response.choices[0].message.content
+        if not user_message:
+            return jsonify({"error": "No message provided"}), 400
 
-        # Return the response to the user
-        return jsonify({"reply": bot_message})
-    except Exception as e:
-        # Handle any errors that occur
-        return jsonify({"error": str(e)}), 500
+        try:
+            # Use the OpenAI API with the updated syntax
+            response = client.chat.completions.create(
+                model="gpt-4",  # Replace with "gpt-3.5-turbo" if applicable
+                messages=[
+                    {"role": "system", "content": "You are a friend who enjoys debating policy issues."},
+                    {"role": "user", "content": user_message}
+                ]
+            )
+            # Extract the assistant's reply
+            bot_message = response.choices[0].message.content
+
+            # Return the response to the user
+            return jsonify({"reply": bot_message})
+        except Exception as e:
+            # Handle any errors that occur
+            return jsonify({"error": str(e)}), 500
 
 # Run the Flask app
 if __name__ == "__main__":
