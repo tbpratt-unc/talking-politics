@@ -13,8 +13,8 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # Initialize Flask app
 app = Flask(__name__)
 
-# Enable CORS
-CORS(app)
+# Enable CORS for all routes
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 @app.route("/", methods=["GET"])
 def home():
