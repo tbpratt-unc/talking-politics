@@ -31,7 +31,7 @@ def chat():
         response = client.chat.completions.create(
             model="gpt-4",  # Replace with "gpt-3.5-turbo" if applicable
             messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "system", "content": "You are a friend who enjoys debating policy issues."},
                 {"role": "user", "content": user_message}
             ]
         )
