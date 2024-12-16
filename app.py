@@ -45,9 +45,10 @@ def chat():
 
     # Handle POST requests for chatbot interactions
     if request.method == 'POST':
-        # Retrieve the user's message and name from the request
+        # Retrieve the user's message, name, and initial chatbot message
         user_message = request.json.get("message")
         user_name = request.json.get("name", "").strip().lower()  # Default to empty string if no name is provided
+        initial_message = request.json.get("initial_message", "").strip()
 
         if not user_message:
             return jsonify({"error": "No message provided"}), 400
@@ -59,15 +60,19 @@ def chat():
         try:
             # Construct messages for OpenAI API
             messages = [
-                    {"role": "system", "content": "You are a conversational and approachable discussion partner who uses natural, engaging language. You are persuasive, concise and avoid overly formal or technical responses."}
+                {"role": "system", "content": "You are a conversational and approachable discussion partner who uses natural, engaging language. You are persuasive, concise and avoid overly formal or technical responses."}
             ]
+
+            # Add initial chatbot message if provided
+            if initial_message:
+                messages.append({"role": "assistant", "content": initial_message})
+
+            # Add the user's input to the conversation
+            messages.append({"role": "user", "content": user_message})
 
             # Add name to the context if a valid name is provided
             if user_name:
                 messages[0]["content"] += f" Address the user as {user_name} when appropriate."
-
-            # Add the user's input to the conversation
-            messages.append({"role": "user", "content": user_message})
 
             # Use the OpenAI API with the updated syntax
             response = client.chat.completions.create(
