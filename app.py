@@ -12,7 +12,16 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "https://unc.az1.qualtrics.com"}})
+
+# Allow multiple origins
+CORS(app, resources={
+    r"/*": {
+        "origins": [
+            "https://unc.az1.qualtrics.com",  # Live survey URL
+            "https://unc.pdx1.qualtrics.com"  # Preview mode URL
+        ]
+    }
+})
 
 @app.after_request
 def after_request(response):
