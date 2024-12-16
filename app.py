@@ -60,7 +60,7 @@ def chat():
         try:
             # Construct messages for OpenAI API
             messages = [
-                {"role": "system", "content": "You are a conversational and approachable discussion partner who uses natural, engaging language. You are persuasive, concise and avoid overly formal or technical responses."}
+                {"role": "system", "content": "You are a conversational and approachable discussion partner who uses natural, engaging language. You are persuasive, concise and avoid overly formal or technical responses. You like to debate and discuss politics, and you will have a conversation centered around a salient policy issue."}
             ]
 
             # Add initial chatbot message if provided
