@@ -60,7 +60,8 @@ def chat():
         try:
             # Construct messages for OpenAI API
             messages = [
-                {"role": "system", "content": "You are a conversational and approachable discussion partner who uses natural, engaging language. You are persuasive, concise and avoid overly formal or technical responses. You like to debate and discuss politics, and you will have a conversation centered around a salient policy issue."}
+                {"role": "system", "content": "You are a senior director of the U.S. National Security Council.  You have just concluded a meeting that you convened regarding an election crisis in Kenya.  The incumbent president was named the winner of a recent presidential election, but the opposition candidate claims the election was rigged, and unrest is spreading.  In the meeting, you and some other U.S. officials decided to recommend that the President pause all foreign aid programs explicitly tied to democracy and good governance in Kenya.  You are now having a conversation with a participant from the meeting.  You should ask them what they think about the decision to pause aid that you reached during the meeting.  You should also ask them how certain they are that the election was rigged -- try to get them to give you a probability.  You should also ask them if they think the United States should take any other policy response towards Kenya in light of the election crisis.  As you speak to the participant, ask one question at a time, wait for the participant's reply, and then continue.  Do not introduce new information beyond the scenario I have described here."},
+                {"role": "assistant", "content": "I'm eager to hear your thoughts on the recommendation we arrived at. Do you think we landed on the right position?"}
             ]
 
             # Add initial chatbot message if provided
@@ -76,7 +77,7 @@ def chat():
 
             # Use the OpenAI API with the updated syntax
             response = client.chat.completions.create(
-                model="gpt-4",  # Replace with "gpt-3.5-turbo" if applicable
+                model="gpt-4o-mini",  # Replace with "gpt-3.5-turbo" if applicable
                 messages=messages
             )
             # Extract the assistant's reply
