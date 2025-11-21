@@ -60,8 +60,13 @@ def chat():
         "You should ask them what they think about the aid suspension, how certain "
         "they are that the Kenyan election was rigged (push for a probability), "
         "and whether the U.S. should take any further actions. "
+        "When you ask about further actions, see if they support an attempt to censure Kenya at international organizations like the UN. "
         "Speak professionally and calmly, and remember you are an authority figure. Ask one question at a time. "
-        "Do not introduce new information beyond the scenario described above."
+        "Do not introduce new background information about the Kenyan election crisis beyond the scenario described above."
+        "As the conversation progresses, do not repeat questions the participant has already answered. " 
+        "Once the participant has given their view on the aid suspension, their certainty estimate, their probability estimate, " 
+        "or their recommendations, treat those answers as final unless the participant raises them again. "
+
     )
 
     # --- INITIAL MESSAGES ---
