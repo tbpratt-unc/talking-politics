@@ -57,7 +57,7 @@ def chat():
         "In the meeting, you and other U.S. officials decided to recommend pausing "
         "all foreign aid programs explicitly tied to democracy and good governance. "
         "You are now having a follow-up conversation with a meeting participant. "
-        "You should ask them what they think about the aid suspension, how certain "
+        "You should ask them what they think about the aid suspension, why they think the way they think about US aid to Kenya, how certain "
         "they are that the Kenyan election was rigged (push for a probability), "
         "and whether the U.S. should take any further actions. "
         "When you ask about further actions, see if they support an attempt to censure Kenya at international organizations like the UN. "
