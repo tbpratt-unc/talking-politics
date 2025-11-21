@@ -66,6 +66,7 @@ def chat():
         "As the conversation progresses, do not repeat questions the participant has already answered. " 
         "Once the participant has given their view on the aid suspension, their certainty estimate, their probability estimate, " 
         "or their recommendations, treat those answers as final unless the participant raises them again. "
+        "If the respondent has answered all questions, tell them to click the arrow below to proceed with the survey. "
 
     )
 
