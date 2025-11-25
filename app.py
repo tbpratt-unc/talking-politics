@@ -51,6 +51,8 @@ def get_conversation_stage(transcript, user_message):
     Uses a lightweight LLM call to determine which question to ask next 
     based on what has already been discussed in the transcript.
     Returns an integer index: 0, 1, 2, or 3 (where 3 means done).
+    
+    Includes a feature to force advancement after a question has been asked 3 times.
     """
     if not transcript and not user_message:
         return 0
@@ -66,13 +68,13 @@ def get_conversation_stage(transcript, user_message):
 
     Determine which of the following mandatory questions the USER has already answered satisfactorily.
     
-     The Mandatory Questions are:
+    The Mandatory Questions are:
     1. {QUESTIONS[0]}
     2. {QUESTIONS[1]}
     3. {QUESTIONS[2]}
 
-     Guidance for Analysis:
-    - Q1 Answer Check: The user must provide a *reason, justification, or factor* for their decision. If they provide ANY such context (e.g., "lack of information", "fraud", "corruption"), mark Q1 as ANSWERED.
+    Guidance for Analysis:
+    - Q1 Answer Check: The user must provide a *reason, justification, or factor* for their decision. If they provide ANY such context (e.g., "lack of information", "fraud", "corruption", "report"), mark Q1 as ANSWERED.
     - Q2 Answer Check: The user must state *one specific piece of information* they want to know (e.g., "counterterrorism impact", "UN response") OR explicitly state they need *no further information* (e.g., "no", "nothing else"). If either condition is met, mark Q2 as ANSWERED.
     - Q3 Answer Check: The user must suggest *any additional action* the US should take OR explicitly state they *do not recommend* any further action. If either condition is met, mark Q3 as ANSWERED.
 
@@ -89,19 +91,71 @@ def get_conversation_stage(transcript, user_message):
     """
 
     try:
+        # Step 1: LLM Classification
         response = client.chat.completions.create(
             model="gpt-4o-mini", # Cheap and fast for classification
             messages=[{"role": "system", "content": "You are a logic engine. Output only a single number."},
                       {"role": "user", "content": classification_prompt}],
             temperature=0
         )
-        stage = response.choices[0].message.content.strip()
-        # Ensure we get a valid integer
-        if stage in ["0", "1", "2", "3"]:
-            return int(stage)
-        return 0 # Default safe fallback
-    except:
+        stage_str = response.choices[0].message.content.strip()
+        
+        # Ensure we get a valid integer, defaulting to 0
+        if stage_str in ["0", "1", "2", "3"]:
+            current_stage = int(stage_str)
+        else:
+            current_stage = 0
+
+        # --- Step 2: Repetition Overrule Logic ---
+
+        # If the LLM thinks we are done (Stage 3), we trust it.
+        if current_stage >= 3:
+            return 3
+        
+        # Determine the question text associated with the current stage.
+        # If current_stage is 0, we check for repetitions of Q1.
+        question_text_to_check = QUESTIONS[current_stage]
+        
+        # Count how many times this specific question (or the previous one) was asked by the Director.
+        # We look for the current stage's question being repeated by the Director.
+        
+        repetition_count = 0
+        
+        # Find all director turns in the transcript
+        director_lines = [
+            line.replace("NSC DIRECTOR:", "").strip() 
+            for line in transcript.split("\n") 
+            if line.startswith("NSC DIRECTOR:")
+        ]
+        
+        # Check for repetitions of the question text
+        for line in director_lines:
+            # Simple substring check is usually sufficient for persistent questions
+            if question_text_to_check in line:
+                repetition_count += 1
+
+        # The initial ask *before* the first user message is assumed (or pre-programmed in Qualtrics).
+        # We must add 1 to the count for the initial ask of Q1, but not for subsequent questions
+        # as those should be fully logged in the transcript.
+        
+        # Given your transcript example, the AI repeated Q1. Let's make the check stricter:
+        # If the stage is 0, we assume the initial Q1 ask happened (count starts at 1).
+        if current_stage == 0 and repetition_count == 0:
+            # If transcript is empty, initial ask is counted via pre-programming
+            repetition_count = 1
+        
+        # The threshold is 3 asks (original + 2 repetitions). 
+        if repetition_count >= 3:
+            # Force advance to the next stage index
+            return min(current_stage + 1, 3) # Cap at Stage 3 (Done)
+
+        return current_stage # Return the LLM's classification if repetition threshold isn't met
+
+    except Exception as e:
+        # Fallback in case the LLM call fails
+        print(f"Error in conversation stage classification: {e}")
         return 0
+
 @app.route("/chat", methods=["POST", "OPTIONS"])
 def chat():
     if request.method == "OPTIONS":
