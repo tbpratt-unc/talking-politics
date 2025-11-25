@@ -24,7 +24,7 @@ CORS(app, resources={
 # --- CONFIGURATION ---
 # The specific questions from your image
 QUESTIONS = [
-    "Why did you arrive at the decision you did regarding US aid to Kenya? What was the most important factor shaping your decision?",
+    "What was the most important factor shaping your decision?",
     "Is there any other information you would want to know about the crisis in Kenya to make a better informed decision?",
     "Beyond US aid, do you think the US should take any additional actions toward Kenya in light of the crisis?"
 ]
