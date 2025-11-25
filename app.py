@@ -66,10 +66,14 @@ def get_conversation_stage(transcript, user_message):
 
     Determine which of the following mandatory questions the USER has already answered satisfactorily.
     
-    The Mandatory Questions are:
+     The Mandatory Questions are:
     1. {QUESTIONS[0]}
     2. {QUESTIONS[1]}
     3. {QUESTIONS[2]}
+
+    Guidance for Analysis:
+    - Q1 Answer Check: If the user provides ANY reason, justification, or factor for their decision (e.g., "lack of information", "fraud", "corruption", "don't trust them", "need to support democracy"), mark Q1 as ANSWERED.
+    - Be generous. If the user responds to the topic of the question, count it as answered.
 
     Rules:
     - If the user has NOT answered Question 1, return "0".
