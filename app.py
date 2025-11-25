@@ -46,7 +46,7 @@ def after_request(response):
 def home():
     return "Flask app is running"
 
-def get_conversation_stage(transcript, user_message):
+ef get_conversation_stage(transcript, user_message):
     """
     Uses a lightweight LLM call to determine which question to ask next 
     based on what has already been discussed in the transcript.
@@ -60,6 +60,10 @@ def get_conversation_stage(transcript, user_message):
 
     classification_prompt = f"""
     Analyze the following conversation transcript between a USER and an NSC DIRECTOR.
+    
+    IMPORTANT CONTEXT: The conversation ALWAYS begins with the NSC Director asking Question 1: "{QUESTIONS[0]}". 
+    Even if this question is not explicitly visible in the transcript, assume it was asked immediately before the User's first response.
+
     Determine which of the following mandatory questions the USER has already answered satisfactorily.
     
     The Mandatory Questions are:
@@ -93,7 +97,6 @@ def get_conversation_stage(transcript, user_message):
         return 0 # Default safe fallback
     except:
         return 0
-
 @app.route("/chat", methods=["POST", "OPTIONS"])
 def chat():
     if request.method == "OPTIONS":
