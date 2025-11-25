@@ -71,9 +71,10 @@ def get_conversation_stage(transcript, user_message):
     2. {QUESTIONS[1]}
     3. {QUESTIONS[2]}
 
-    Guidance for Analysis:
-    - Q1 Answer Check: If the user provides ANY reason, justification, or factor for their decision (e.g., "lack of information", "fraud", "corruption", "don't trust them", "need to support democracy"), mark Q1 as ANSWERED.
-    - Be generous. If the user responds to the topic of the question, count it as answered.
+     Guidance for Analysis:
+    - Q1 Answer Check: The user must provide a *reason, justification, or factor* for their decision. If they provide ANY such context (e.g., "lack of information", "fraud", "corruption"), mark Q1 as ANSWERED.
+    - Q2 Answer Check: The user must state *one specific piece of information* they want to know (e.g., "counterterrorism impact", "UN response") OR explicitly state they need *no further information* (e.g., "no", "nothing else"). If either condition is met, mark Q2 as ANSWERED.
+    - Q3 Answer Check: The user must suggest *any additional action* the US should take OR explicitly state they *do not recommend* any further action. If either condition is met, mark Q3 as ANSWERED.
 
     Rules:
     - If the user has NOT answered Question 1, return "0".
