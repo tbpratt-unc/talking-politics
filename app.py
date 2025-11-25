@@ -46,7 +46,7 @@ def after_request(response):
 def home():
     return "Flask app is running"
 
-ef get_conversation_stage(transcript, user_message):
+def get_conversation_stage(transcript, user_message):
     """
     Uses a lightweight LLM call to determine which question to ask next 
     based on what has already been discussed in the transcript.
