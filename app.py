@@ -180,7 +180,7 @@ def chat():
             if line.startswith("YOU:"):
                 messages.append({"role": "user", "content": line.replace("YOU:", "").strip()})
             elif line.startswith("NSC DIRECTOR:"):
-                messages.append({"role": "assistant", "content": line.replace("NSC DIRECTOR:", "").strip())
+                messages.append({"role": "assistant", "content": line.replace("NSC DIRECTOR:", "").strip()})
 
     messages.append({"role": "user", "content": user_message})
 
