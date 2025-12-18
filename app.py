@@ -58,12 +58,27 @@ QUESTIONS = [
 
 def analyze_answered_questions(transcript):
     """
-    Analyze the conversation transcript to determine which questions have been answered.
-    Returns a list of answered question IDs.
+    Determine which questions have been answered using GPT analysis.
+    Also track forced progression conditions (two user responses per question).
     """
     if not transcript or transcript.strip() == "":
         return []
-    
+
+    # Forced progression logic: count user responses for each question
+    response_count = {}
+    for line in transcript.split("\n"):
+        line = line.strip()
+        if line.startswith("YOU:"):
+            for question in QUESTIONS:
+                if question['question'] in transcript:
+                    response_count[question['id']] = response_count.get(question['id'], 0) + 1
+
+    # Automatically mark questions as answered if user input exceeds 2 attempts
+    answered_ids = [
+        q_id for q_id, count in response_count.items() if count >= 2
+    ]
+
+    # Allow relaxed sufficiency evaluation by GPT
     analysis_prompt = f"""Analyze this conversation transcript and determine which of the following questions have been answered by the user (marked as "YOU:").
 
 Questions to check:
@@ -72,15 +87,15 @@ Questions to check:
 3. certainty_rigged: Did they provide ANY certainty or probability estimate about whether the election was rigged? (like "70%" or "very certain" or "not sure")
 4. further_actions: Did they express ANY view on further US actions or UN censure? (like "yes we should" or "no more action needed")
 
-IMPORTANT: Accept ANY answer as valid, even if it's brief or vague. If the user said ANYTHING in response to a question on that topic, mark it as answered.
+IMPORTANT: Accept ANY answer as valid, even if it's brief or vague. Responses like "move on" or "next question" should also be treated as valid.
 
 Transcript:
 {transcript}
 
-Respond with ONLY a JSON array of the question IDs that have been answered. Example: ["aid_opinion", "reasoning"]
+Respond with ONLY a JSON array of the question IDs that have been answered, combining forced progression and GPT judgment. Example: ["aid_opinion", "reasoning"]
 If none answered, respond with: []
 """
-    
+
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -88,10 +103,10 @@ If none answered, respond with: []
             temperature=0
         )
         result = response.choices[0].message.content.strip()
-        answered = json.loads(result)  # Parse the result as JSON
-        return answered
+        gpt_answered = json.loads(result)
+        return list(set(answered_ids + gpt_answered))  # Combine forced ids and GPT-judged sufficiency
     except:
-        return []
+        return answered_ids  # Return forced progression IDs if GPT fails
 
 def get_next_question(answered_ids):
     """
@@ -113,7 +128,7 @@ def chat():
     # Parse inputs
     user_message = request.json.get("message", "").strip()
     transcript = request.json.get("transcript", "")
-    
+
     if not user_message:
         return jsonify({"error": "No message provided"}), 400
 
@@ -121,7 +136,7 @@ def chat():
     updated_transcript = transcript + f"\nYOU: {user_message}" if transcript else f"YOU: {user_message}"
     answered_questions = analyze_answered_questions(updated_transcript)
     next_question = get_next_question(answered_questions)
-    
+
     # Generate system prompt
     if next_question:
         current_status = f"Questions already answered: {', '.join(answered_questions) if answered_questions else 'none yet'}"
