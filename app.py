@@ -119,50 +119,43 @@ def chat():
 
     if not user_message:
         return jsonify({"error": "No message provided"}), 400
-
-    # --- STEP 1: LOGIC CHECK ---
-    # Determine which question we should be asking
-    current_stage_index = get_conversation_stage(transcript, user_message)
-
-    # --- STEP 2: CONSTRUCT DYNAMIC SYSTEM PROMPT ---
-    # We dynamically build the prompt based on the stage to force the AI to behave
     
     # 1. Get the current stage from the request (Qualtrics should send this)
-# If Qualtrics doesn't send it yet, we default to 0, but it's better to track it.
-previous_stage = int(request.json.get("current_stage_index", 0))
-current_stage_index = get_conversation_stage(transcript, user_message, previous_stage)
+    # If Qualtrics doesn't send it yet, we default to 0, but it's better to track it.
+    previous_stage = int(request.json.get("current_stage_index", 0))
+    current_stage_index = get_conversation_stage(transcript, user_message, previous_stage)
 
-# 2. Build the Instruction with Strict Constraints
-if current_stage_index == 0:
-    task_instruction = (
-        f"MANDATORY TASK: Ask the user: '{QUESTIONS[0]}'. "
-        "Do not discuss anything else."
-    )
-elif current_stage_index == 1:
-    task_instruction = (
-        "The user has completed the first topic. "
-        "DO NOT ask about their decision factors again. "
-        f"Acknowledge their last point and ask exactly: '{QUESTIONS[1]}'."
-    )
-elif current_stage_index == 2:
-    task_instruction = (
-        "The user has completed the first two topics. "
-        "DO NOT go back to previous questions. "
-        f"Acknowledge and ask exactly: '{QUESTIONS[2]}'."
-    )
-else:
-    task_instruction = (
-        "The interview is over. Do not ask any more questions. "
-        "Thank them and tell them to click the arrow to proceed."
-    )
+    # 2. Build the Instruction with Strict Constraints
+    if current_stage_index == 0:
+        task_instruction = (
+            f"MANDATORY TASK: Ask the user: '{QUESTIONS[0]}'. "
+            "Do not discuss anything else."
+        )
+    elif current_stage_index == 1:
+        task_instruction = (
+            "The user has completed the first topic. "
+            "DO NOT ask about their decision factors again. "
+            f"Acknowledge their last point and ask exactly: '{QUESTIONS[1]}'."
+        )
+    elif current_stage_index == 2:
+        task_instruction = (
+            "The user has completed the first two topics. "
+            "DO NOT go back to previous questions. "
+            f"Acknowledge and ask exactly: '{QUESTIONS[2]}'."
+        )
+    else:
+        task_instruction = (
+            "The interview is over. Do not ask any more questions. "
+            "Thank them and tell them to click the arrow to proceed."
+        )
 
-# 3. Add a Global Constraint to the System Persona
-full_system_prompt = (
-    f"{SYSTEM_PERSONA}\n"
-    "CRITICAL RULE: You must proceed linearly. Once a topic is discussed, "
-    "never refer back to it or re-ask previous questions. "
-    f"\n\nCURRENT INSTRUCTION: {task_instruction}"
-)
+    # 3. Add a Global Constraint to the System Persona
+    full_system_prompt = (
+        f"{SYSTEM_PERSONA}\n"
+        "CRITICAL RULE: You must proceed linearly. Once a topic is discussed, "
+        "never refer back to it or re-ask previous questions. "
+        f"\n\nCURRENT INSTRUCTION: {task_instruction}"
+    )
 
     # --- INITIAL MESSAGES ---
     messages = [{"role": "system", "content": full_system_prompt}]
