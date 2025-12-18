@@ -3,6 +3,7 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import os
 from flask_cors import CORS
+import json
 
 # Load environment variables
 load_dotenv()
@@ -21,23 +22,6 @@ CORS(app, resources={
     }
 })
 
-# --- CONFIGURATION ---
-QUESTIONS = [
-    "What was the most important factor shaping your decision?",
-    "Is there any other information you would want to know about the crisis in Kenya to make a better informed decision?",
-    "Beyond US aid, do you think the US should take any additional actions toward Kenya in light of the crisis?"
-]
-
-SYSTEM_PERSONA = (
-    "You are a senior director of the U.S. National Security Council. "
-    "You have just concluded a meeting regarding an election crisis in Kenya. "
-    "Speak professionally and calmly, and remember you are an authority figure. "
-    "Keep your responses concise (2-3 sentences max) to keep the user engaged."
-)
-
-# Initialize a counter for user responses after Stage 1
-user_turn_count_after_first_stage = 0 
-
 @app.after_request
 def after_request(response):
     response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
@@ -48,70 +32,75 @@ def after_request(response):
 def home():
     return "Flask app is running"
 
-def get_conversation_stage(transcript, user_message, current_stage_index):
-    global user_turn_count_after_first_stage  # Access the counter for responses after Stage 1
+# Questions with identifiers and descriptions for tracking
+QUESTIONS = [
+    {
+        "id": "aid_opinion",
+        "question": "What do you think about the aid suspension we recommended?",
+        "description": "Their opinion on pausing democracy/governance aid"
+    },
+    {
+        "id": "reasoning",
+        "question": "Why do you think the way you do about the US aid decision?",
+        "description": "Their reasoning behind their position"
+    },
+    {
+        "id": "certainty_rigged",
+        "question": "How certain are you that the Kenyan election was rigged? Can you give me a probability estimate?",
+        "description": "Their certainty/probability that the election was rigged"
+    },
+    {
+        "id": "further_actions",
+        "question": "Do you think the U.S. should take any further actions? For instance, would you support an attempt to censure Kenya at international organizations like the UN?",
+        "description": "Their view on additional actions like UN censure"
+    }
+]
 
-    # Minimum character count check
-    min_character_count = 10
-
-    # If moving beyond Stage 1, start tracking responses independently
-    if current_stage_index > 0:
-        if len(user_message.strip()) >= min_character_count:
-            user_turn_count_after_first_stage += 1
-            # Automatically move to Stage 3 if this count is 3 or greater
-            if user_turn_count_after_first_stage >= 3:
-                return 3
-
-    # Regular logic for advancing stages
-    if not transcript and not user_message:
-        return 0
-
-    # For Stage 1, check the minimum character count
-    if current_stage_index == 1 and len(user_message.strip()) >= min_character_count:
-        return 2  # Advance to Stage 2
-
-    # Fallback to prompting GPT classification logic for additional evaluation
-    full_context = f"{transcript}\nYOU: {user_message}" if transcript else f"YOU: {user_message}"
-
-    classification_prompt = f"""
-    Analyze the transcript. Determine if the USER has answered the questions below.
-    
-    Current Stage Index: {current_stage_index}
-    Mandatory Questions:
-    0. {QUESTIONS[0]}
-    1. {QUESTIONS[1]}
-    2. {QUESTIONS[2]}
-
-    Rules:
-    - If the user has answered the question for the current stage, suggest the NEXT stage.
-    - NEVER return a number lower than {current_stage_index}.
-    - Q2 is answered if they provide some information or say 'none' explicitly.
-    - Q3 is answered if they suggest an action or say 'none'.
-
-    Only return the single digit number.
+def analyze_answered_questions(transcript):
     """
+    Analyze the conversation transcript to determine which questions have been answered.
+    Returns a list of answered question IDs.
+    """
+    if not transcript or transcript.strip() == "":
+        return []
+    
+    analysis_prompt = f"""Analyze this conversation transcript and determine which of the following questions have been answered by the user (marked as "YOU:").
 
+Questions to check:
+1. aid_opinion: Did they give ANY opinion on the aid suspension? (even brief like "I agree" or "bad idea")
+2. reasoning: Did they give ANY reason for their position? (even brief like "because of media" or "it's unfair")
+3. certainty_rigged: Did they provide ANY certainty or probability estimate about whether the election was rigged? (like "70%" or "very certain" or "not sure")
+4. further_actions: Did they express ANY view on further US actions or UN censure? (like "yes we should" or "no more action needed")
+
+IMPORTANT: Accept ANY answer as valid, even if it's brief or vague. If the user said ANYTHING in response to a question on that topic, mark it as answered.
+
+Transcript:
+{transcript}
+
+Respond with ONLY a JSON array of the question IDs that have been answered. Example: ["aid_opinion", "reasoning"]
+If none answered, respond with: []
+"""
+    
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role": "system", "content": "You are a logic engine. Output only a single number."},
-                      {"role": "user", "content": classification_prompt}],
+            messages=[{"role": "user", "content": analysis_prompt}],
             temperature=0
         )
-        new_stage = int(response.choices[0].message.content.strip())
-        
-        # Ensure the stage progresses in a "ratcheting" manner
-        stage_to_use = max(new_stage, current_stage_index)
+        result = response.choices[0].message.content.strip()
+        answered = json.loads(result)  # Parse the result as JSON
+        return answered
+    except:
+        return []
 
-        # If GPT suggests Stage 3, force progression
-        if stage_to_use >= 3:
-            return 3
-
-        return stage_to_use
-
-    except Exception as e:
-        print(f"Error: {e}")
-        return current_stage_index
+def get_next_question(answered_ids):
+    """
+    Returns the next unanswered question, or None if all have been answered.
+    """
+    for q in QUESTIONS:
+        if q["id"] not in answered_ids:
+            return q
+    return None
 
 @app.route("/chat", methods=["POST", "OPTIONS"])
 def chat():
@@ -121,65 +110,55 @@ def chat():
         response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
         return response, 200
 
-    # --- 1. Parse inputs ---
+    # Parse inputs
     user_message = request.json.get("message", "").strip()
     transcript = request.json.get("transcript", "")
     
-    # Receive the current stage from Qualtrics (default to 0 if not sent)
-    previous_stage = int(request.json.get("current_stage_index", 0))
-
     if not user_message:
         return jsonify({"error": "No message provided"}), 400
 
-    # --- 2. Determine Next Stage ---
-    current_stage_index = get_conversation_stage(transcript, user_message, previous_stage)
-
-    # --- 3. Construct Instructions ---
-    if current_stage_index == 0:
-        task_instruction = f"Ask the user exactly this: '{QUESTIONS[0]}'." if QUESTIONS[0] not in transcript else (
-            "The user provided an answer, but it lacked sufficient detail. Briefly acknowledge their point but ask them to explain WHY it was important."
-        )
-    elif current_stage_index == 1:
-        task_instruction = f"Acknowledge their last point and ask exactly: '{QUESTIONS[1]}'."
-    elif current_stage_index == 2:
-        task_instruction = f"Acknowledge and ask exactly: '{QUESTIONS[2]}'."
+    # Update transcript and analyze answered questions
+    updated_transcript = transcript + f"\nYOU: {user_message}" if transcript else f"YOU: {user_message}"
+    answered_questions = analyze_answered_questions(updated_transcript)
+    next_question = get_next_question(answered_questions)
+    
+    # Generate system prompt
+    if next_question:
+        current_status = f"Questions already answered: {', '.join(answered_questions) if answered_questions else 'none yet'}"
+        system_prompt = f"""
+You are a senior director of the U.S. National Security Council. Speak professionally and calmly.
+CURRENT STATUS:
+- {current_status}
+INSTRUCTION:
+1. Briefly acknowledge what the participant just said.
+2. Ask EXACTLY this next question: "{next_question['question']}"
+3. Do not re-ask previously answered questions.
+"""
     else:
-        task_instruction = "Thank them and tell them to click the arrow to proceed."
+        system_prompt = """
+All questions have been answered. Thank the participant and ask them to proceed with the survey. Do not ask further questions.
+"""
 
-    full_system_prompt = (
-        f"{SYSTEM_PERSONA}\n"
-        "CRITICAL RULE: Once a topic is addressed, never re-ask previous questions. "
-        f"\n\nCURRENT INSTRUCTION: {task_instruction}"
-    )
-
-    # --- 4. Reconstruct Messages ---
-    messages = [{"role": "system", "content": full_system_prompt}]
+    # Construct AI assistant messages
+    messages = [{"role": "system", "content": system_prompt}]
     if transcript:
         for line in transcript.split("\n"):
             line = line.strip()
-            if not line:
-                continue
             if line.startswith("YOU:"):
                 messages.append({"role": "user", "content": line.replace("YOU:", "").strip()})
             elif line.startswith("NSC DIRECTOR:"):
                 messages.append({"role": "assistant", "content": line.replace("NSC DIRECTOR:", "").strip()})
-
     messages.append({"role": "user", "content": user_message})
 
-    # --- 5. OpenAI Request ---
+    # Call OpenAI for completion
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
             temperature=0.7
         )
-
         bot_reply = response.choices[0].message.content
-        
-        return jsonify({
-            "reply": bot_reply,
-            "current_stage_index": current_stage_index
-        })
+        return jsonify({"reply": bot_reply})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
