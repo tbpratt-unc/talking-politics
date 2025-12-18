@@ -36,6 +36,9 @@ SYSTEM_PERSONA = (
     "Keep your responses concise (2-3 sentences max) to keep the user engaged."
 )
 
+# Initialize a counter to track responses after Stage 1
+user_turn_count_after_first_stage = 0 
+
 @app.after_request
 def after_request(response):
     response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
@@ -47,20 +50,28 @@ def home():
     return "Flask app is running"
 
 def get_conversation_stage(transcript, user_message, current_stage_index):
+    global user_turn_count_after_first_stage  # Persist response count across calls
+
+    # If moving beyond the first stage, start tracking counts independently
+    if current_stage_index > 0:
+        user_turn_count_after_first_stage += 1
+        # Automatically move to Stage 3 if this count is 3 or greater
+        if user_turn_count_after_first_stage >= 3:
+            return 3
+
+    # Regular logic for advancing stages
     if not transcript and not user_message:
         return 0
     
-    # Count how many times the USER has spoken
+    # --- Count user turns ---
     user_turn_count = transcript.count("YOU:") + 1 
 
-    # --- NEW: Hard-coded advancement rules ---
-    # Force Stage 1 if user has sent 2+ messages
-    # Force Stage 2 if user has sent 4+ messages
-    if user_turn_count >= 2:
-        return 1 # Move to Q2
-    if user_turn_count >= 4:
-        return 2 # Move to Q3
-    
+    # --- Hard-coded advancement rules ---
+    if user_turn_count >= 2 and current_stage_index == 0:
+        return 1  # Move to Q2 (second stage)
+    if user_turn_count >= 4 and current_stage_index == 1:
+        return 2  # Move to Q3 (third stage)
+
     full_context = f"{transcript}\nYOU: {user_message}" if transcript else f"YOU: {user_message}"
 
     classification_prompt = f"""
@@ -102,7 +113,7 @@ def get_conversation_stage(transcript, user_message, current_stage_index):
         repetition_count = transcript.count(question_text_to_check)
         
         if stage_to_use == 0:
-            repetition_count += 1 # Account for initial Qualtrics ask
+            repetition_count += 1  # Account for initial Qualtrics ask
         
         if repetition_count >= 3:
             return min(stage_to_use + 1, 3)  # Force progression after 3 repeats
