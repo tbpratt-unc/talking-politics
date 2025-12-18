@@ -22,7 +22,6 @@ CORS(app, resources={
 })
 
 # --- CONFIGURATION ---
-# The specific questions from your image
 QUESTIONS = [
     "What was the most important factor shaping your decision?",
     "Is there any other information you would want to know about the crisis in Kenya to make a better informed decision?",
@@ -36,7 +35,7 @@ SYSTEM_PERSONA = (
     "Keep your responses concise (2-3 sentences max) to keep the user engaged."
 )
 
-# Initialize a counter to track responses after Stage 1
+# Initialize a counter for user responses after Stage 1
 user_turn_count_after_first_stage = 0 
 
 @app.after_request
@@ -50,27 +49,33 @@ def home():
     return "Flask app is running"
 
 def get_conversation_stage(transcript, user_message, current_stage_index):
-    global user_turn_count_after_first_stage  # Persist response count across calls
+    global user_turn_count_after_first_stage  # Access the counter for responses after Stage 1
 
-    # If moving beyond the first stage, start tracking counts independently
+    # Minimum character count check
+    min_character_count = 10
+
+    # If moving beyond Stage 1, start tracking responses independently
     if current_stage_index > 0:
-        user_turn_count_after_first_stage += 1
-        # Automatically move to Stage 3 if this count is 3 or greater
-        if user_turn_count_after_first_stage >= 3:
-            return 3
+        if len(user_message.strip()) >= min_character_count:
+            user_turn_count_after_first_stage += 1
+            # Automatically move to Stage 3 if this count is 3 or greater
+            if user_turn_count_after_first_stage >= 3:
+                return 3
 
     # Regular logic for advancing stages
     if not transcript and not user_message:
         return 0
-    
+
     # --- Count user turns ---
     user_turn_count = transcript.count("YOU:") + 1 
 
     # --- Hard-coded advancement rules ---
     if user_turn_count >= 2 and current_stage_index == 0:
         return 1  # Move to Q2 (second stage)
-    if user_turn_count >= 4 and current_stage_index == 1:
-        return 2  # Move to Q3 (third stage)
+    
+    # For Stage 1, check the minimum character count
+    if current_stage_index == 1 and len(user_message.strip()) >= min_character_count:
+        return 2  # Advance to Stage 2
 
     full_context = f"{transcript}\nYOU: {user_message}" if transcript else f"YOU: {user_message}"
 
@@ -108,7 +113,7 @@ def get_conversation_stage(transcript, user_message, current_stage_index):
         if stage_to_use >= 3:
             return 3
         
-        # --- FIX 2: Enhanced Repetition Check ---
+        # --- Enhanced Repetition Check ---
         question_text_to_check = QUESTIONS[stage_to_use]
         repetition_count = transcript.count(question_text_to_check)
         
@@ -142,44 +147,28 @@ def chat():
     if not user_message:
         return jsonify({"error": "No message provided"}), 400
 
-    # --- 2. Determine Next Stage (Using the Ratchet) ---
+    # --- 2. Determine Next Stage ---
     current_stage_index = get_conversation_stage(transcript, user_message, previous_stage)
 
-    # --- 3. Construct Instructions with Strict Constraints ---
+    # --- 3. Construct Instructions ---
     if current_stage_index == 0:
-    # Check if the question was already asked to decide the tone
-        if QUESTIONS[0] in transcript:
-            task_instruction = (
-                "The user provided an answer, but it lacked sufficient detail. "
-                "Briefly acknowledge their point about the monitor report, "
-                "but ask them to explain WHY that specific report was the most "
-                "important factor for their decision."
-            )
-        else:
-            task_instruction = f"Ask the user exactly this: '{QUESTIONS[0]}'."
-    
+        task_instruction = f"Ask the user exactly this: '{QUESTIONS[0]}'." if QUESTIONS[0] not in transcript else (
+            "The user provided an answer, but it lacked sufficient detail. "
+            "Briefly acknowledge their point about the monitor report, "
+            "but ask them to explain WHY that specific report was the most "
+            "important factor for their decision."
+        )
     elif current_stage_index == 1:
-        task_instruction = (
-            "The user has completed the first topic. "
-            "DO NOT ask about their decision factors again. "
-            f"Acknowledge their last point and ask exactly: '{QUESTIONS[1]}'."
-        )
+        task_instruction = f"Acknowledge their last point and ask exactly: '{QUESTIONS[1]}'."
     elif current_stage_index == 2:
-        task_instruction = (
-            "The user has completed the first two topics. "
-            "DO NOT go back to previous questions. "
-            f"Acknowledge and ask exactly: '{QUESTIONS[2]}'."
-        )
+        task_instruction = f"Acknowledge and ask exactly: '{QUESTIONS[2]}'."
     else:
-        task_instruction = (
-            "The interview is over. Do not ask any more questions. "
-            "Thank them and tell them to click the arrow to proceed."
-        )
+        task_instruction = "Thank them and tell them to click the arrow to proceed."
 
     full_system_prompt = (
         f"{SYSTEM_PERSONA}\n"
-        "CRITICAL RULE: You must proceed linearly. Once a topic is discussed, "
-        "never refer back to it or re-ask previous questions. "
+        "CRITICAL RULE: You must proceed linearly. "
+        "Once a topic is addressed, never re-ask previous questions. "
         f"\n\nCURRENT INSTRUCTION: {task_instruction}"
     )
 
@@ -188,15 +177,14 @@ def chat():
     if transcript:
         for line in transcript.split("\n"):
             line = line.strip()
-            if not line: continue
             if line.startswith("YOU:"):
                 messages.append({"role": "user", "content": line.replace("YOU:", "").strip()})
             elif line.startswith("NSC DIRECTOR:"):
-                messages.append({"role": "assistant", "content": line.replace("NSC DIRECTOR:", "").strip()})
+                messages.append({"role": "assistant", "content": line.replace("NSC DIRECTOR:", "").strip())
 
     messages.append({"role": "user", "content": user_message})
 
-    # --- 5. Call OpenAI & Return Stage ---
+    # --- 5. OpenAI Request ---
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -206,7 +194,6 @@ def chat():
 
         bot_reply = response.choices[0].message.content
         
-        # IMPORTANT: Return current_stage_index so Qualtrics can track the state
         return jsonify({
             "reply": bot_reply,
             "current_stage_index": current_stage_index 
