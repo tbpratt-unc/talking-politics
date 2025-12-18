@@ -113,19 +113,20 @@ def chat():
         response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
         return response, 200
 
-    # --- Parse inputs ---
+    # --- 1. Parse inputs ---
     user_message = request.json.get("message", "").strip()
     transcript = request.json.get("transcript", "")
+    
+    # Receive the current stage from Qualtrics (default to 0 if not sent)
+    previous_stage = int(request.json.get("current_stage_index", 0))
 
     if not user_message:
         return jsonify({"error": "No message provided"}), 400
-    
-    # 1. Get the current stage from the request (Qualtrics should send this)
-    # If Qualtrics doesn't send it yet, we default to 0, but it's better to track it.
-    previous_stage = int(request.json.get("current_stage_index", 0))
+
+    # --- 2. Determine Next Stage (Using the Ratchet) ---
     current_stage_index = get_conversation_stage(transcript, user_message, previous_stage)
 
-    # 2. Build the Instruction with Strict Constraints
+    # --- 3. Construct Instructions with Strict Constraints ---
     if current_stage_index == 0:
         task_instruction = (
             f"MANDATORY TASK: Ask the user: '{QUESTIONS[0]}'. "
@@ -149,7 +150,6 @@ def chat():
             "Thank them and tell them to click the arrow to proceed."
         )
 
-    # 3. Add a Global Constraint to the System Persona
     full_system_prompt = (
         f"{SYSTEM_PERSONA}\n"
         "CRITICAL RULE: You must proceed linearly. Once a topic is discussed, "
@@ -157,10 +157,8 @@ def chat():
         f"\n\nCURRENT INSTRUCTION: {task_instruction}"
     )
 
-    # --- INITIAL MESSAGES ---
+    # --- 4. Reconstruct Messages ---
     messages = [{"role": "system", "content": full_system_prompt}]
-
-    # --- RECONSTRUCT TRANSCRIPT FOR CONTEXT ---
     if transcript:
         for line in transcript.split("\n"):
             line = line.strip()
@@ -170,10 +168,9 @@ def chat():
             elif line.startswith("NSC DIRECTOR:"):
                 messages.append({"role": "assistant", "content": line.replace("NSC DIRECTOR:", "").strip()})
 
-    # Add current message
     messages.append({"role": "user", "content": user_message})
 
-    # --- CALL OPENAI ---
+    # --- 5. Call OpenAI & Return Stage ---
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -182,7 +179,12 @@ def chat():
         )
 
         bot_reply = response.choices[0].message.content
-        return jsonify({"reply": bot_reply})
+        
+        # IMPORTANT: Return current_stage_index so Qualtrics can track the state
+        return jsonify({
+            "reply": bot_reply,
+            "current_stage_index": current_stage_index 
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
