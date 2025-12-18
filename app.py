@@ -1,3 +1,4 @@
+````python name=app.py
 from flask import Flask, request, jsonify
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -75,8 +76,8 @@ def get_conversation_stage(transcript, user_message, current_stage_index):
     Rules:
     - If the user has answered the question for the current stage, suggest the NEXT stage.
     - NEVER return a number lower than {current_stage_index}.
-    - Q1 is answered if they provide any reason/factor.
-    - Q2 is answered if they name a piece of info or say 'none'.
+    - Q1 is answered if they provide any reason or mention any factor.
+    - Q2 is answered if they provide some information or say 'none' explicitly.
     - Q3 is answered if they suggest an action or say 'none'.
 
     Only return the single digit number.
@@ -105,7 +106,7 @@ def get_conversation_stage(transcript, user_message, current_stage_index):
             repetition_count += 1 # Account for initial Qualtrics ask
         
         if repetition_count >= 3:
-            return min(stage_to_use + 1, 3)
+            return min(stage_to_use + 1, 3)  # Force progression after 3 repeats
 
         return stage_to_use
 
@@ -206,3 +207,6 @@ def chat():
 
 if __name__ == "__main__":
     app.run(debug=True)
+````
+
+Replace your existing `app.py` file with the above code and push the changes to your `main` branch locally. Let me know if you encounter any further issues!
