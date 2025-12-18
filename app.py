@@ -66,17 +66,11 @@ def get_conversation_stage(transcript, user_message, current_stage_index):
     if not transcript and not user_message:
         return 0
 
-    # --- Count user turns ---
-    user_turn_count = transcript.count("YOU:") + 1 
-
-    # --- Hard-coded advancement rules ---
-    if user_turn_count >= 2 and current_stage_index == 0:
-        return 1  # Move to Q2 (second stage)
-    
     # For Stage 1, check the minimum character count
     if current_stage_index == 1 and len(user_message.strip()) >= min_character_count:
         return 2  # Advance to Stage 2
 
+    # Fallback to prompting GPT classification logic for additional evaluation
     full_context = f"{transcript}\nYOU: {user_message}" if transcript else f"YOU: {user_message}"
 
     classification_prompt = f"""
@@ -91,7 +85,6 @@ def get_conversation_stage(transcript, user_message, current_stage_index):
     Rules:
     - If the user has answered the question for the current stage, suggest the NEXT stage.
     - NEVER return a number lower than {current_stage_index}.
-    - Q1 is answered if they provide any reason or mention any factor.
     - Q2 is answered if they provide some information or say 'none' explicitly.
     - Q3 is answered if they suggest an action or say 'none'.
 
@@ -107,21 +100,12 @@ def get_conversation_stage(transcript, user_message, current_stage_index):
         )
         new_stage = int(response.choices[0].message.content.strip())
         
-        # --- FIX 1: The Ratchet (Only move forward) ---
+        # Ensure the stage progresses in a "ratcheting" manner
         stage_to_use = max(new_stage, current_stage_index)
 
+        # If GPT suggests Stage 3, force progression
         if stage_to_use >= 3:
             return 3
-        
-        # --- Enhanced Repetition Check ---
-        question_text_to_check = QUESTIONS[stage_to_use]
-        repetition_count = transcript.count(question_text_to_check)
-        
-        if stage_to_use == 0:
-            repetition_count += 1  # Account for initial Qualtrics ask
-        
-        if repetition_count >= 3:
-            return min(stage_to_use + 1, 3)  # Force progression after 3 repeats
 
         return stage_to_use
 
@@ -153,10 +137,7 @@ def chat():
     # --- 3. Construct Instructions ---
     if current_stage_index == 0:
         task_instruction = f"Ask the user exactly this: '{QUESTIONS[0]}'." if QUESTIONS[0] not in transcript else (
-            "The user provided an answer, but it lacked sufficient detail. "
-            "Briefly acknowledge their point about the monitor report, "
-            "but ask them to explain WHY that specific report was the most "
-            "important factor for their decision."
+            "The user provided an answer, but it lacked sufficient detail. Briefly acknowledge their point but ask them to explain WHY it was important."
         )
     elif current_stage_index == 1:
         task_instruction = f"Acknowledge their last point and ask exactly: '{QUESTIONS[1]}'."
@@ -167,8 +148,7 @@ def chat():
 
     full_system_prompt = (
         f"{SYSTEM_PERSONA}\n"
-        "CRITICAL RULE: You must proceed linearly. "
-        "Once a topic is addressed, never re-ask previous questions. "
+        "CRITICAL RULE: Once a topic is addressed, never re-ask previous questions. "
         f"\n\nCURRENT INSTRUCTION: {task_instruction}"
     )
 
@@ -177,6 +157,8 @@ def chat():
     if transcript:
         for line in transcript.split("\n"):
             line = line.strip()
+            if not line:
+                continue
             if line.startswith("YOU:"):
                 messages.append({"role": "user", "content": line.replace("YOU:", "").strip()})
             elif line.startswith("NSC DIRECTOR:"):
@@ -196,7 +178,7 @@ def chat():
         
         return jsonify({
             "reply": bot_reply,
-            "current_stage_index": current_stage_index 
+            "current_stage_index": current_stage_index
         })
 
     except Exception as e:
