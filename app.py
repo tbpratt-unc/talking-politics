@@ -46,12 +46,20 @@ def after_request(response):
 def home():
     return "Flask app is running"
 
-def get_conversation_stage(transcript, user_message, current_stage_index):
-    """
-    Determines the next stage while ensuring the conversation only moves forward.
-    """
+def get_conversation_stage(transcript, user_message):
     if not transcript and not user_message:
         return 0
+    
+    # Count how many times the USER has spoken
+    user_turn_count = transcript.count("YOU:") + 1 
+
+    # --- NEW: Hard-coded advancement rules ---
+    # Force Stage 1 if user has sent 2+ messages
+    # Force Stage 2 if user has sent 4+ messages
+    if user_turn_count >= 2:
+        return 1 # Move to Q2
+    if user_turn_count >= 4:
+        return 2 # Move to Q3
     
     full_context = f"{transcript}\nYOU: {user_message}" if transcript else f"YOU: {user_message}"
 
@@ -128,10 +136,17 @@ def chat():
 
     # --- 3. Construct Instructions with Strict Constraints ---
     if current_stage_index == 0:
-        task_instruction = (
-            f"MANDATORY TASK: Ask the user: '{QUESTIONS[0]}'. "
-            "Do not discuss anything else."
-        )
+    # Check if the question was already asked to decide the tone
+        if QUESTIONS[0] in transcript:
+            task_instruction = (
+                "The user provided an answer, but it lacked sufficient detail. "
+                "Briefly acknowledge their point about the monitor report, "
+                "but ask them to explain WHY that specific report was the most "
+                "important factor for their decision."
+            )
+        else:
+            task_instruction = f"Ask the user exactly this: '{QUESTIONS[0]}'."
+    
     elif current_stage_index == 1:
         task_instruction = (
             "The user has completed the first topic. "
