@@ -46,115 +46,64 @@ def after_request(response):
 def home():
     return "Flask app is running"
 
-def get_conversation_stage(transcript, user_message):
+def get_conversation_stage(transcript, user_message, current_stage_index):
     """
-    Uses a lightweight LLM call to determine which question to ask next 
-    based on what has already been discussed in the transcript.
-    Returns an integer index: 0, 1, 2, or 3 (where 3 means done).
-    
-    Includes a feature to force advancement after a question has been asked 3 times.
+    Determines the next stage while ensuring the conversation only moves forward.
     """
     if not transcript and not user_message:
         return 0
     
-    # Combine transcript and current message for analysis
     full_context = f"{transcript}\nYOU: {user_message}" if transcript else f"YOU: {user_message}"
 
     classification_prompt = f"""
-    Analyze the following conversation transcript between a USER and an NSC DIRECTOR.
+    Analyze the transcript. Determine if the USER has answered the questions below.
     
-    IMPORTANT CONTEXT: The conversation ALWAYS begins with the NSC Director asking Question 1: "{QUESTIONS[0]}". 
-    Even if this question is not explicitly visible in the transcript, assume it was asked immediately before the User's first response.
-
-    Determine which of the following mandatory questions the USER has already answered satisfactorily.
-    
-    The Mandatory Questions are:
-    1. {QUESTIONS[0]}
-    2. {QUESTIONS[1]}
-    3. {QUESTIONS[2]}
-
-    Guidance for Analysis:
-    - Q1 Answer Check: The user must provide a *reason, justification, or factor* for their decision. If they provide ANY such context (e.g., "lack of information", "fraud", "corruption", "report"), mark Q1 as ANSWERED.  If they have already sent at least two messages total, mark Q1 as answered.
-    - Q2 Answer Check: The user must state *one specific piece of information* they want to know (e.g., "counterterrorism impact", "UN response") OR explicitly state they need *no further information* (e.g., "no", "nothing else"). If either condition is met, mark Q2 as ANSWERED.  If they have already sent at least four messages total, mark Q2 as answered.
-    - Q3 Answer Check: The user must suggest *any additional action* the US should take OR state they *do not recommend* any further action. If either condition is met, mark Q3 as ANSWERED.
+    Current Stage Index: {current_stage_index}
+    Mandatory Questions:
+    0. {QUESTIONS[0]}
+    1. {QUESTIONS[1]}
+    2. {QUESTIONS[2]}
 
     Rules:
-    - If the user has NOT answered Question 1, return "0".
-    - If the user has answered Q1 but NOT Q2, return "1".
-    - If the user has answered Q1 and Q2 but NOT Q3, return "2".
-    - If the user has answered all three questions, return "3".
-    
-    Only return the single digit number (0, 1, 2, or 3).
-    
-    Transcript:
-    {full_context}
+    - If the user has answered the question for the current stage, suggest the NEXT stage.
+    - NEVER return a number lower than {current_stage_index}.
+    - Q1 is answered if they provide any reason/factor.
+    - Q2 is answered if they name a piece of info or say 'none'.
+    - Q3 is answered if they suggest an action or say 'none'.
+
+    Only return the single digit number.
     """
 
     try:
-        # Step 1: LLM Classification
         response = client.chat.completions.create(
-            model="gpt-4o-mini", # Cheap and fast for classification
+            model="gpt-4o-mini",
             messages=[{"role": "system", "content": "You are a logic engine. Output only a single number."},
                       {"role": "user", "content": classification_prompt}],
             temperature=0
         )
-        stage_str = response.choices[0].message.content.strip()
+        new_stage = int(response.choices[0].message.content.strip())
         
-        # Ensure we get a valid integer, defaulting to 0
-        if stage_str in ["0", "1", "2", "3"]:
-            current_stage = int(stage_str)
-        else:
-            current_stage = 0
+        # --- FIX 1: The Ratchet (Only move forward) ---
+        stage_to_use = max(new_stage, current_stage_index)
 
-        # --- Step 2: Repetition Overrule Logic ---
-
-        # If the LLM thinks we are done (Stage 3), we trust it.
-        if current_stage >= 3:
+        if stage_to_use >= 3:
             return 3
         
-        # Determine the question text associated with the current stage.
-        # If current_stage is 0, we check for repetitions of Q1.
-        question_text_to_check = QUESTIONS[current_stage]
+        # --- FIX 2: Enhanced Repetition Check ---
+        question_text_to_check = QUESTIONS[stage_to_use]
+        repetition_count = transcript.count(question_text_to_check)
         
-        # Count how many times this specific question (or the previous one) was asked by the Director.
-        # We look for the current stage's question being repeated by the Director.
+        if stage_to_use == 0:
+            repetition_count += 1 # Account for initial Qualtrics ask
         
-        repetition_count = 0
-        
-        # Find all director turns in the transcript
-        director_lines = [
-            line.replace("NSC DIRECTOR:", "").strip() 
-            for line in transcript.split("\n") 
-            if line.startswith("NSC DIRECTOR:")
-        ]
-        
-        # Check for repetitions of the question text
-        for line in director_lines:
-            # Simple substring check is usually sufficient for persistent questions
-            if question_text_to_check in line:
-                repetition_count += 1
-
-        # The initial ask *before* the first user message is assumed (or pre-programmed in Qualtrics).
-        # We must add 1 to the count for the initial ask of Q1, but not for subsequent questions
-        # as those should be fully logged in the transcript.
-        
-        # Given your transcript example, the AI repeated Q1. Let's make the check stricter:
-        # If the stage is 0, we assume the initial Q1 ask happened (count starts at 1).
-        if current_stage == 0 and repetition_count == 0:
-            # If transcript is empty, initial ask is counted via pre-programming
-            repetition_count = 1
-        
-        # The threshold is 3 asks (original + 2 repetitions). 
         if repetition_count >= 3:
-            # Force advance to the next stage index
-            return min(current_stage + 1, 3) # Cap at Stage 3 (Done)
+            return min(stage_to_use + 1, 3)
 
-        return current_stage # Return the LLM's classification if repetition threshold isn't met
+        return stage_to_use
 
     except Exception as e:
-        # Fallback in case the LLM call fails
-        print(f"Error in conversation stage classification: {e}")
-        return 0
+        print(f"Error: {e}")
+        return current_stage_index
 
 @app.route("/chat", methods=["POST", "OPTIONS"])
 def chat():
@@ -178,32 +127,42 @@ def chat():
     # --- STEP 2: CONSTRUCT DYNAMIC SYSTEM PROMPT ---
     # We dynamically build the prompt based on the stage to force the AI to behave
     
-    task_instruction = ""
-    
-    if current_stage_index == 0:
-        task_instruction = (
-            f"The user has not yet answered the first question. "
-            f"Ask them exactly this: '{QUESTIONS[0]}'. "
-            "Do not move on until they answer this."
-        )
-    elif current_stage_index == 1:
-        task_instruction = (
-            f"The user just answered the first question. Acknowledge their answer briefly, "
-            f"then ask the second question: '{QUESTIONS[1]}'."
-        )
-    elif current_stage_index == 2:
-        task_instruction = (
-            f"The user just answered the second question. Acknowledge their answer briefly, "
-            f"then ask the third question: '{QUESTIONS[2]}'."
-        )
-    else: # Stage 3
-        task_instruction = (
-            "The user has answered all questions. Thank them for their time and "
-            "tell them to click the arrow below to proceed with the survey. "
-            "Do not ask any further questions."
-        )
+    # 1. Get the current stage from the request (Qualtrics should send this)
+# If Qualtrics doesn't send it yet, we default to 0, but it's better to track it.
+previous_stage = int(request.json.get("current_stage_index", 0))
+current_stage_index = get_conversation_stage(transcript, user_message, previous_stage)
 
-    full_system_prompt = f"{SYSTEM_PERSONA}\n\nCURRENT INSTRUCTION: {task_instruction}"
+# 2. Build the Instruction with Strict Constraints
+if current_stage_index == 0:
+    task_instruction = (
+        f"MANDATORY TASK: Ask the user: '{QUESTIONS[0]}'. "
+        "Do not discuss anything else."
+    )
+elif current_stage_index == 1:
+    task_instruction = (
+        "The user has completed the first topic. "
+        "DO NOT ask about their decision factors again. "
+        f"Acknowledge their last point and ask exactly: '{QUESTIONS[1]}'."
+    )
+elif current_stage_index == 2:
+    task_instruction = (
+        "The user has completed the first two topics. "
+        "DO NOT go back to previous questions. "
+        f"Acknowledge and ask exactly: '{QUESTIONS[2]}'."
+    )
+else:
+    task_instruction = (
+        "The interview is over. Do not ask any more questions. "
+        "Thank them and tell them to click the arrow to proceed."
+    )
+
+# 3. Add a Global Constraint to the System Persona
+full_system_prompt = (
+    f"{SYSTEM_PERSONA}\n"
+    "CRITICAL RULE: You must proceed linearly. Once a topic is discussed, "
+    "never refer back to it or re-ask previous questions. "
+    f"\n\nCURRENT INSTRUCTION: {task_instruction}"
+)
 
     # --- INITIAL MESSAGES ---
     messages = [{"role": "system", "content": full_system_prompt}]
