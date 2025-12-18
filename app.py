@@ -46,7 +46,7 @@ def after_request(response):
 def home():
     return "Flask app is running"
 
-def get_conversation_stage(transcript, user_message):
+def get_conversation_stage(transcript, user_message, current_stage_index):
     if not transcript and not user_message:
         return 0
     
