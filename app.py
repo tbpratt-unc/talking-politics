@@ -207,5 +207,3 @@ def chat():
 if __name__ == "__main__":
     app.run(debug=True)
 ````
-
-Replace your existing `app.py` file with the above code and push the changes to your `main` branch locally. Let me know if you encounter any further issues!
