@@ -3,7 +3,6 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import os
 from flask_cors import CORS
-import json
 
 # Load environment variables
 load_dotenv()
@@ -22,7 +21,7 @@ CORS(app, resources={
     }
 })
 
-# --- CONFIGURATION (Substance from Script 1) ---
+# --- CONFIGURATION ---
 QUESTIONS = [
     {
         "id": "decision_factor",
@@ -40,8 +39,7 @@ QUESTIONS = [
 
 SYSTEM_PERSONA = (
     "You are a senior director of the U.S. National Security Council. "
-    "You have just concluded a meeting regarding an election crisis in Kenya. "
-    "Speak professionally and calmly, and remember you are an authority figure. "
+    "Speak professionally and calmly. You are an authority figure. "
     "Keep your responses concise (2-3 sentences max) to keep the user engaged."
 )
 
@@ -51,31 +49,26 @@ def after_request(response):
     response.headers.add("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
     return response
 
-# --- LOGIC (Progression from Script 2) ---
-def analyze_answered_questions(transcript):
-    if not transcript or transcript.strip() == "":
-        return []
+def is_current_question_answered(transcript, user_message, current_q):
+    """
+    Checks ONLY if the specific current question has been addressed.
+    This prevents the AI from skipping multiple stages at once.
+    """
+    # Safety Check: If the question text appears 2+ times, force move on
+    if transcript.count(current_q['question']) >= 2:
+        return True
 
-    # 1. Forced progression: count user responses for each question found in the transcript
-    answered_ids = []
-    for q in QUESTIONS:
-        if q['question'] in transcript:
-            # Count how many times the user replied AFTER this question appeared
-            count = transcript.count("YOU:") 
-            # Note: This is a simplified count; in a live session, 
-            # we check if the user has replied at least twice total.
-            if transcript.count(q['question']) >= 2: 
-                answered_ids.append(q['id'])
+    analysis_prompt = f"""
+    You are a logic engine. Analyze the user's latest message in the context of the question asked.
+    
+    Current Question Asked: "{current_q['question']}"
+    User's Latest Message: "{user_message}"
 
-    # 2. GPT sufficiency judgment
-    analysis_prompt = f"""Analyze this transcript. Determine if the user has answered these questions:
-    1. decision_factor: Why they made their choice.
-    2. info_needs: What else they want to know (or 'nothing').
-    3. additional_actions: Other US actions suggested (or 'none').
+    Did the user provide an answer to THIS SPECIFIC question? 
+    (Accept brief or vague answers like "none", "not sure", or "I already told you", but they must have replied to this topic).
 
-    Accept brief or vague answers. 
-    Transcript: {transcript}
-    Respond with ONLY a JSON array of answered IDs. Example: ["decision_factor"]"""
+    Respond with ONLY 'YES' or 'NO'.
+    """
 
     try:
         response = client.chat.completions.create(
@@ -83,10 +76,10 @@ def analyze_answered_questions(transcript):
             messages=[{"role": "user", "content": analysis_prompt}],
             temperature=0
         )
-        gpt_answered = json.loads(response.choices[0].message.content.strip())
-        return list(set(answered_ids + gpt_answered))
-    except:
-        return answered_ids
+        return "YES" in response.choices[0].message.content.upper()
+    except Exception as e:
+        print(f"Logic Error: {e}")
+        return False
 
 @app.route("/chat", methods=["POST", "OPTIONS"])
 def chat():
@@ -96,38 +89,57 @@ def chat():
     user_message = request.json.get("message", "").strip()
     transcript = request.json.get("transcript", "")
     
+    # Receive the current stage from Qualtrics (0, 1, or 2)
+    current_index = int(request.json.get("current_stage_index", 0))
+
     if not user_message:
-        return jsonify({"error": "No message"}), 400
+        return jsonify({"error": "No message provided"}), 400
 
-    # Determine state
-    updated_transcript = transcript + f"\nYOU: {user_message}"
-    answered_ids = analyze_answered_questions(updated_transcript)
-    
-    # Find the first question in the list that hasn't been answered
-    next_q = next((q for q in QUESTIONS if q["id"] not in answered_ids), None)
+    # --- 1. DETERMINE IF WE MOVE FORWARD (MAX +1) ---
+    if current_index < len(QUESTIONS):
+        answered = is_current_question_answered(transcript, user_message, QUESTIONS[current_index])
+        if answered:
+            current_index += 1
 
-    # Build Persona Prompt
-    if next_q:
-        instruction = f"Acknowledge their point briefly. Then, ask EXACTLY: '{next_q['question']}'"
+    # --- 2. SELECT THE NEXT TASK ---
+    if current_index < len(QUESTIONS):
+        next_q = QUESTIONS[current_index]
+        task_instruction = f"Acknowledge the user's point briefly. Then, ask EXACTLY this question: '{next_q['question']}'"
     else:
-        instruction = "The interview is over. Thank them professionally and tell them to click the arrow to proceed."
+        task_instruction = "The interview is over. Thank them and tell them to click the arrow to proceed. Do not ask more questions."
 
-    full_system_prompt = f"{SYSTEM_PERSONA}\n\nCRITICAL INSTRUCTION: {instruction}"
+    full_system_prompt = f"{SYSTEM_PERSONA}\n\nCURRENT TASK: {task_instruction}"
 
-    # Build Message History
+    # --- 3. CONSTRUCT PERSONA RESPONSE ---
     messages = [{"role": "system", "content": full_system_prompt}]
-    # (Transcript parsing logic remains the same)
-    for line in transcript.split("\n"):
-        if line.startswith("YOU:"):
-            messages.append({"role": "user", "content": line.replace("YOU:", "").strip()})
-        elif line.startswith("NSC DIRECTOR:"):
-            messages.append({"role": "assistant", "content": line.replace("NSC DIRECTOR:", "").strip()})
+    
+    # Reconstruct history from transcript for the assistant's context
+    if transcript:
+        for line in transcript.split("\n"):
+            line = line.strip()
+            if not line: continue
+            if line.startswith("YOU:"):
+                messages.append({"role": "user", "content": line.replace("YOU:", "").strip()})
+            elif line.startswith("NSC DIRECTOR:"):
+                messages.append({"role": "assistant", "content": line.replace("NSC DIRECTOR:", "").strip()})
+
     messages.append({"role": "user", "content": user_message})
 
     try:
-        res = client.chat.completions.create(model="gpt-4o-mini", messages=messages)
-        bot_reply = res.choices[0].message.content
-        return jsonify({"reply": bot_reply, "answered_ids": answered_ids})
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.7
+        )
+
+        bot_reply = response.choices[0].message.content
+        
+        # Return BOTH the reply and the updated index for Qualtrics to store
+        return jsonify({
+            "reply": bot_reply,
+            "current_stage_index": current_index 
+        })
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
